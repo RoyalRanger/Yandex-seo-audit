@@ -129,6 +129,71 @@ async def robots_txt():
 дублирующий контент (тот же список статей, что и на главной/категориях, просто
 отфильтрованный query-строкой); индексация таких URL размывает вес без пользы.
 
+## IndexNow (обязательная часть аудита для нового сайта)
+
+Ключ + роут, отдающий его на корне (FastAPI, литеральный путь — не `{key}`
+параметром, чтобы не пересекаться с другими роутами):
+
+```python
+INDEXNOW_KEY = "СГЕНЕРИРОВАННЫЙ_HEX_КЛЮЧ"  # secrets.token_hex(16)
+
+async def _indexnow_key_file():
+    return PlainTextResponse(INDEXNOW_KEY)
+
+router.add_api_route(f"/{INDEXNOW_KEY}.txt", _indexnow_key_file, methods=["GET"])
+```
+
+Отдельный скрипт `indexnow_notify.py` в корне проекта — запускать в конце
+деплоя (последний шаг деплой-скрипта проекта):
+
+```python
+#!/usr/bin/env python3
+"""Отправляет все URL сайта в IndexNow. Запускать после каждого деплоя."""
+import json, re, urllib.error, urllib.request
+from urllib.parse import urlparse
+
+KEY = "СГЕНЕРИРОВАННЫЙ_HEX_КЛЮЧ"
+HOST = "ДОМЕН"
+SITEMAP_URL = f"https://{HOST}/sitemap.xml"  # живой запрос, если sitemap
+                                              # генерируется динамически —
+                                              # не хардкодь список URL и не
+                                              # читай с диска устаревший файл
+
+with urllib.request.urlopen(SITEMAP_URL, timeout=15) as resp:
+    xml = resp.read().decode("utf-8")
+urls = re.findall(r"<loc>([^<]+)</loc>", xml)
+if not urls:
+    raise RuntimeError(f"sitemap.xml не дал ни одного <loc> ({SITEMAP_URL})")
+# host у IndexNow — точное совпадение netloc, не подстрока (реальный кейс:
+# order.pamyatnikbel.ru тоже содержит "pamyatnikbel.ru" и проходил бы наивный
+# фильтр, из-за чего Яндекс возвращал 422 "Invalid urls" на весь батч).
+urls = [u for u in urls if urlparse(u).netloc == HOST]
+
+payload = json.dumps({
+    "host": HOST, "key": KEY, "keyLocation": f"https://{HOST}/{KEY}.txt",
+    "urlList": urls,
+}).encode()
+req = urllib.request.Request("https://yandex.com/indexnow", data=payload,
+                              headers={"Content-Type": "application/json"}, method="POST")
+try:
+    with urllib.request.urlopen(req) as resp:
+        print(f"Yandex IndexNow: {resp.status} {resp.reason} ({len(urls)} URL)")
+except urllib.error.HTTPError as e:
+    print(f"Yandex IndexNow FAILED: {e.code} {e.read().decode(errors='replace')}")
+    raise
+```
+
+Встраивание в деплой (пример для PowerShell-деплой-скрипта — тот же принцип
+на любом стеке CI):
+
+```powershell
+# в конце deploy.ps1, после успешного рестарта сервиса
+& "$LOCAL_DIR\venv\Scripts\python.exe" "$LOCAL_DIR\indexnow_notify.py"
+```
+
+Проверка: `curl https://ДОМЕН/<KEY>.txt` должен вернуть сам ключ, а прогон
+скрипта — `202 Accepted`.
+
 ## Верификация после деплоя
 
 ```bash
@@ -140,4 +205,6 @@ m = re.search(r'<script type=\"application/ld\+json\">(.*?)</script>', html, re.
 print(json.loads(m.group(1)))  # упадёт с ошибкой, если JSON невалиден
 "
 curl -s https://ДОМЕН/robots.txt
+curl -s https://ДОМЕН/<KEY>.txt  # должен вернуть сам ключ
+python3 indexnow_notify.py  # должен напечатать "202 Accepted"
 ```
