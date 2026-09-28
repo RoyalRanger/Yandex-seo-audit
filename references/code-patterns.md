@@ -85,6 +85,7 @@ category/page вариантах — иначе SearchAction дублирует�
   "@type": "WebSite",
   "name": "ИМЯ САЙТА",
   "url": "{{ request.url.scheme }}://{{ request.url.netloc }}/",
+  "areaServed": {"@type": "Country", "name": "Россия"},
   "potentialAction": {
     "@type": "SearchAction",
     "target": "{{ request.url.scheme }}://{{ request.url.netloc }}/search?q={search_term_string}",
@@ -93,6 +94,19 @@ category/page вариантах — иначе SearchAction дублирует�
 }
 </script>
 {% endif %}
+```
+
+`areaServed: Россия` — дефолт для любого сайта, если владелец явно не назвал
+другой регион/город. Не заменяет настройку региона в самом Яндекс.Вебмастере
+(Индексирование → Региональность) — у неё нет API ни на чтение, ни на запись
+через MCP `yandex-webmaster`, выставляет только сам владелец руками в
+интерфейсе; это лишь дублирующий сигнал на стороне сайта. Заодно упомяни
+регион простым текстом в подвале (footer) сайта:
+
+```html
+<footer>
+  <p>ИМЯ САЙТА — ... Регион: Россия. ...</p>
+</footer>
 ```
 
 ## favicon.ico на корне
